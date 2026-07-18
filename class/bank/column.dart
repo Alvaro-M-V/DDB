@@ -1,0 +1,37 @@
+import '../../enums/bank/value_column_type.dart';
+
+class Column {
+  final String name;
+  final ValueColumnType type;
+  final bool isKey;
+  final bool canNull;
+
+  const Column({
+    required this.name,
+    required this.type,
+    this.isKey = false,
+    this.canNull = false,
+  });
+
+  bool copampareType(Object object) {
+    bool condition;
+    switch (this.type) {
+      case ValueColumnType.bool:
+        object is bool ? condition = true : condition = false;
+        break;
+      case ValueColumnType.int:
+        object is int ? condition = true : condition = false;
+        break;
+      case ValueColumnType.double:
+        object is double ? condition = true : condition = false;
+        break;
+      case ValueColumnType.string:
+        object is String ? condition = true : condition = false;
+        break;
+      case ValueColumnType.dateTime:
+        object is DateTime ? condition = true : condition = false;
+        break;
+    }
+    return condition;
+  }
+}
