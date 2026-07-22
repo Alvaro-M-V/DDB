@@ -34,4 +34,22 @@ class Column {
     }
     return condition;
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'type': type.name,
+      'canNull': canNull,
+      'isKey': isKey,
+    };
+  }
+
+  factory Column.fromJson(Map<String, dynamic> json) {
+    return Column(
+      name: json['name'] as String,
+      type: ValueColumnType.values.byName(json['type']),
+      canNull: json['canNull'] as bool,
+      isKey: json['isKey'] as bool,
+    );
+  }
 }

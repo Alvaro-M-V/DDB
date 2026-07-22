@@ -4,7 +4,7 @@ import 'class/bank/structure.dart';
 import 'class/bank/table.dart';
 import 'enums/bank/value_column_type.dart';
 
-void main() {
+Future<void> main() async {
   Structure structure = Structure(name: 'Oficina', tables: []);
   Table table = Table(
     name: 'cars',
@@ -24,36 +24,5 @@ void main() {
     'cars',
     Registry(data: {'name': 'Maveric', 'year': 1979, 'isFunctional': false}),
   );
-  try {
-    structure = structure.insertInto(
-      'cars',
-      Registry(
-        data: {
-          'name': 'opala',
-          'year': 1989,
-          'isFunctional': true,
-          'buy': false,
-        },
-      ),
-    );
-  } catch (e) {
-    print('Error: $e');
-  }
-  try {
-    structure = structure.insertInto(
-      'cars',
-      Registry(data: {'neme': 'opala', 'year': 1989, 'isFunctional': true}),
-    );
-  } catch (e) {
-    print('Error: $e');
-  }
-  try {
-    structure = structure.insertInto(
-      'cars',
-      Registry(data: {'name': 'opala', 'year': false, 'isFunctional': true}),
-    );
-  } catch (e) {
-    print('Error: $e');
-  }
   print(structure.searchTable('cars').scanAll().toString());
 }

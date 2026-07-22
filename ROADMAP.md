@@ -2,7 +2,7 @@
 
 Banco de dados relacional escrito do zero em Dart, sem libs externas de banco. Documento de referência técnica do projeto — estado atual e próximas fases.
 
-## Estado atual: Fase 1 completa (modelo de dados em memória)
+## Estado atual: Fase 2 completa (persistência em disco)
 
 ### Estrutura de arquivos
 ```
@@ -51,18 +51,43 @@ Motivação: viabilizar histórico de snapshots pra transações/rollback na Fas
 
 ---
 
-## Fase 2 — Persistência em disco
+## Fase 2 — Persistência em disco ✅ (completa e testada de ponta a ponta)
 
-Objetivo: `Structure` sobreviver ao fim do processo — salvar em arquivo e recarregar.
+Objetivo atingido: `Structure` sobrevive ao fim do processo. Provado com dois processos separados (um grava e encerra, outro só lê), preservando todos os tipos: `int`, `double`, `bool`, `string`, `dateTime` (preenchido e nulo), múltiplas tabelas, e objeto carregado permanece operável (`insertInto` roda nele).
 
-Tarefas:
-- Decidir formato de serialização inicial (recomendado: JSON via `dart:convert`, simples de debugar; formato binário próprio fica pra depois se performance virar problema).
-- `toJson()` em `Registry`, `Column`, `Table`, `Structure` (cadeia de serialização).
-- `fromJson()` (constructor factory) equivalente pra cada classe, reconstruindo os objetos a partir do `Map` decodificado.
-- Tratamento de `ValueColumnType` no JSON (serializar como string via `.name`, desserializar via `ValueColumnType.values.byName(...)`).
-- Tratamento de `DateTime` no JSON (não tem representação nativa em JSON — serializar como ISO 8601 string via `.toIso8601String()` / `DateTime.parse()`).
-- API de entrada: `Structure.save(String path)` e `Structure.load(String path)` (ou factory `Structure.fromFile`), usando `dart:io` (`File`).
-- Definir: um arquivo por `Structure` inteira, ou um arquivo por `Table`? (trade-off simplicidade vs. permitir carregar tabelas individualmente).
+### O que foi construído
+
+**Cadeia de serialização (`toJson`/`fromJson`) nas 4 classes.** Formato: **JSON via `dart:convert`**.
+- `Column`: `type` serializado como string via `ValueColumnType.name`; reconstruído via `ValueColumnType.values.byName(...)`.
+- `Registry`: `toJson` devolve `{'data': data}`; `fromJson` reconstrói o Map cru (sem tratar `dateTime` — ver abaixo).
+- `Table` e `Structure`: `toJson` passa as listas de filhos cruas (o `jsonEncode` chama `.toJson()` recursivo automaticamente na ida); `fromJson` reconstrói via `.map((m) => Filho.fromJson(m as Map<String, dynamic>)).toList()`.
+
+**Persistência em disco (`dart:io`), só na `Structure`:**
+- `Future<void> save(String path) async` — encadeia `this.toJson()` → `jsonEncode(...)` → `await File(path).writeAsString(...)`.
+- `static Future<Structure> load(String path) async` — encadeia `await File(path).readAsString()` → `jsonDecode(...)` → `Structure.fromJson(...)`. É `static` (não factory) porque factory não pode ser `async` (`Factory bodies can't use 'async'`), e não é método de instância porque cria a `Structure` do zero.
+
+**Tratamento de `DateTime` (assimétrico por necessidade):**
+- **Ida** (`Structure.save`): via segundo parâmetro `toEncodable` do `jsonEncode` — `(obj) => obj is DateTime ? obj.toIso8601String() : (obj as dynamic).toJson()`. Um único ponto no topo trata toda a árvore. **Cuidado documentado:** passar `toEncodable` **substitui** o comportamento padrão de chamar `.toJson()`, então a função tem que tratar `DateTime` **e** delegar o resto pro `.toJson()`.
+- **Volta** (`Table.fromJson`): a string ISO é indistinguível de uma coluna `string`, então a reconversão é decidida **pelo schema**, nunca pelo valor. Para cada campo `(key, value)` do `data`: acha a `Column` por `name == key`; se `type == dateTime && value != null` → `DateTime.parse(value)`, senão passa inalterado. A condição `value != null` é obrigatória (colunas `dateTime` com `canNull: true` gravam `null`, e `DateTime.parse(null)` estoura).
+
+### Decisões de arquitetura
+
+- **Um arquivo por `Structure` inteira** (não um por `Table`). `save`/`load` vivem só na `Structure`; tentativas de pôr em `Registry`/`Table` foram descartadas.
+- **`DateTime` orquestrado com baixo acoplamento**: a ida mora no `Structure.save` (só o topo chama `jsonEncode`; detectar `is DateTime` não precisa do schema). A volta mora na `Table.fromJson` (precisa das `columns` + `registries` juntos). As classes-filhas (`Registry`, `Column`) permanecem desacopladas — nenhuma conhece o schema da outra. Regra que emergiu: "o pai orquestra só quando precisa cruzar dado das filhas" — na ida não há dado cruzado, na volta há.
+
+### Notas técnicas de evolução (Fase 2)
+
+- **Padrão de erro dominante da sessão: confundir *afirmar um tipo* com *construir/converter um valor*.** Reincidiu 5x — `enum == String`, `json['type'] as ValueColumnType`, `json['columns'] as List<Column>`, `registry as Registry` dentro de `.map`, `json['type']` comparado direto. Raiz: `as` não executa transformação nenhuma (só afirma pro compilador), e `==` entre tipos diferentes é sempre `false`. **Consolidado ao fim**: depois que `ValueColumnType.values.byName` fez sentido no caso escalar, o usuário generalizou pra listas (`.map(...fromJson...).toList()`) sem dica.
+- **Recorrente ao longo da fase: colocar lógica na classe errada.** `save`/`load` foram criados em `Registry` e depois em `Table` antes de irem pra `Structure`; o `toEncodable` idem. Corrigido por rastreamento ("quem realmente chama `jsonEncode`?"), mas o reflexo de duplicar em vez de localizar apareceu duas vezes. Ainda não consolidado.
+- **Novo, aplicado com dica: factory de corpo com variável local.** A volta exigiu reusar as `columns` reconstruídas em dois lugares (campo `columns:` + conversão de `dateTime`); o usuário não percebeu sozinho que isso força abandonar o `return Table(...)` de expressão única e usar corpo `{ }` com `final columns` local. Conceito novo, precisou ser apontado.
+- **Bordas encontradas por teste, não por revisão** (reforça rodar de verdade): `DateTime.parse(null)` só apareceu ao testar coluna `dateTime` nulável; a pegadinha do `toEncodable` substituir o `toJson` padrão só apareceu rodando probe isolado.
+
+### Pendências herdadas da Fase 1 (ainda abertas)
+
+- `Column.copampareType` — typo no nome.
+- `Structure.searchTable` — sem `orElse` (lança `StateError` genérico).
+- `throw Exception(['string'])` com colchetes espalhado — trocar por `Exception('string')` ou exceptions próprias.
+- **Nova, da Fase 2:** `ValueColumnType.values.byName(...)` e `DateTime.parse(...)` lançam erros genéricos em arquivo corrompido/editado à mão — candidatos a exceptions próprias (ex: `CorruptedFileException`) quando a fase de tratamento de erros chegar.
 
 ---
 
